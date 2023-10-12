@@ -5,8 +5,8 @@ pub struct UUID<'p> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum NodeElement{
-    Text(String),
+pub enum NodeElement<'s>{
+    Word(&'s str),
     TempBlob((String, Vec<u32>)),
     TempRef(Vec<u32>),
     Property(NodeProperty)

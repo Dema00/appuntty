@@ -42,25 +42,23 @@ fn property(input: &str) -> IResult<&str, NodeProperty> {
 }
 
 #[rustfmt::skip]
-fn word(input: &str) -> IResult<&str, String> {
+fn word(input: &str) -> IResult<&str, &str> {
     preceded(
         many0(tag(" ")), 
-        map(
-            terminated(
+        terminated(
                 take_until(" "),tag(" ")
-            ), 
-            |word| String::from(word))
+            )
     )
     .parse(input)
 }
 
 #[rustfmt::skip]
-fn node_content_fragment(input: &str) -> IResult<&str, NodeElement> {
+fn node_element(input: &str) -> IResult<&str, NodeElement> {
     alt(
         (
             map(uuid, |ref_id| NodeElement::TempRef(ref_id)),
             map(property, |property| NodeElement::Property(property)),
-            map(word, |word| NodeElement::Text(word))
+            map(word, |text| NodeElement::Word(text))
         )
     )
     .parse(input)
@@ -68,7 +66,7 @@ fn node_content_fragment(input: &str) -> IResult<&str, NodeElement> {
 
 fn node_content(input: &str) -> IResult<&str, Vec<NodeElement>> {
     fold_many0(
-        node_content_fragment,
+        node_element,
         Vec::new,
         |mut contents: Vec<NodeElement>, fragment| {
             contents.push(fragment);
@@ -91,7 +89,7 @@ fn node_content(input: &str) -> IResult<&str, Vec<NodeElement>> {
 mod tests {
     use crate::backend::{
         node::{NodeContent, NodeElement, NodeProperty},
-        parser::{uuid, node_content},
+        parser::{uuid, node_content, blob, property, word},
     };
 
     #[test]
@@ -101,18 +99,36 @@ mod tests {
     }
 
     #[test]
-    fn node_ez_test() {
+    fn blob_test() {
+        let res = blob("blob");
+        assert_eq!(res, Ok(("", NodeProperty::Blob)));
+    }
+
+    #[test]
+    fn prop_test() {
+        let res = property("<blob>");
+        assert_eq!(res, Ok(("", NodeProperty::Blob)));
+    }
+
+    #[test]
+    fn word_test() {
+        let res = word(" word ");
+        assert_eq!(res, Ok(("", "word")))
+    }
+
+    #[test]
+    fn node_contet_test() {
         let res = node_content(" ciao #(1.2.3) eccomi sono io <blob>");
         assert_eq!(
             res,
             Ok((
                 "",
                 vec![
-                    NodeElement::Text(String::from("ciao")),
+                    NodeElement::Word("ciao"),
                     NodeElement::TempRef(vec![1, 2, 3]),
-                    NodeElement::Text(String::from("eccomi")),
-                    NodeElement::Text(String::from("sono")),
-                    NodeElement::Text(String::from("io")),
+                    NodeElement::Word("eccomi"),
+                    NodeElement::Word("sono"),
+                    NodeElement::Word("io"),
                     NodeElement::Property(NodeProperty::Blob)
                 ]
             ))
