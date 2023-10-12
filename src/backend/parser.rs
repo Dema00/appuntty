@@ -1,6 +1,6 @@
 extern crate nom;
 
-use super::node::NodeContent;
+use super::node::{NodeElement, NodeProperty};
 
 use std::str::FromStr;
 
@@ -11,7 +11,7 @@ use nom::{
         complete::char, complete::digit1, is_alphabetic, is_alphanumeric, is_digit, is_space,
     },
     combinator::{map, map_res},
-    multi::{fold_many0, many_till, separated_list1},
+    multi::{fold_many0, many_till, separated_list1, many0},
     sequence::{delimited, preceded, tuple, terminated},
     IResult, Parser,
 };
@@ -30,10 +30,21 @@ fn uuid(input: &str) -> IResult<&str, TempRefID> {
     .parse(input)
 }
 
+fn blob(input: &str) -> IResult<&str, NodeProperty> {
+    map(tag("blob"), |blob| NodeProperty::Blob).parse(input)
+}
+
+fn property(input: &str) -> IResult<&str, NodeProperty> {
+    delimited(tag("<"),
+    alt((blob,)),
+    tag(">")
+    ).parse(input)
+}
+
 #[rustfmt::skip]
 fn word(input: &str) -> IResult<&str, String> {
     preceded(
-        tag(" "), 
+        many0(tag(" ")), 
         map(
             terminated(
                 take_until(" "),tag(" ")
@@ -44,25 +55,22 @@ fn word(input: &str) -> IResult<&str, String> {
 }
 
 #[rustfmt::skip]
-fn node_content_fragment(input: &str) -> IResult<&str, NodeContent> {
+fn node_content_fragment(input: &str) -> IResult<&str, NodeElement> {
     alt(
         (
-            map(uuid, |ref_id| NodeContent::TempRef(ref_id)),
-            map(word, |word| NodeContent::Text(word))
+            map(uuid, |ref_id| NodeElement::TempRef(ref_id)),
+            map(property, |property| NodeElement::Property(property)),
+            map(word, |word| NodeElement::Text(word))
         )
     )
     .parse(input)
 }
 
-fn node_content(input: &str) -> IResult<&str, Vec<NodeContent>> {
+fn node_content(input: &str) -> IResult<&str, Vec<NodeElement>> {
     fold_many0(
-        // Our parser function– parses a single string fragment
         node_content_fragment,
-        // Our init value, an empty string
         Vec::new,
-        // Our folding function. For each fragment, append the fragment to the
-        // string
-        |mut contents: Vec<NodeContent>, fragment| {
+        |mut contents: Vec<NodeElement>, fragment| {
             contents.push(fragment);
             contents
         },
@@ -82,7 +90,7 @@ fn node_content(input: &str) -> IResult<&str, Vec<NodeContent>> {
 #[cfg(test)]
 mod tests {
     use crate::backend::{
-        node::NodeContent,
+        node::{NodeContent, NodeElement, NodeProperty},
         parser::{uuid, node_content},
     };
 
@@ -94,15 +102,18 @@ mod tests {
 
     #[test]
     fn node_ez_test() {
-        let res = node_content(" ciao #(1.2.3) eccomi ");
+        let res = node_content(" ciao #(1.2.3) eccomi sono io <blob>");
         assert_eq!(
             res,
             Ok((
                 "",
                 vec![
-                    NodeContent::Text(String::from("ciao")),
-                    NodeContent::TempRef(vec![1, 2, 3]),
-                    NodeContent::Text(String::from("eccomi"))
+                    NodeElement::Text(String::from("ciao")),
+                    NodeElement::TempRef(vec![1, 2, 3]),
+                    NodeElement::Text(String::from("eccomi")),
+                    NodeElement::Text(String::from("sono")),
+                    NodeElement::Text(String::from("io")),
+                    NodeElement::Property(NodeProperty::Blob)
                 ]
             ))
         );
