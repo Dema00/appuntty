@@ -31,6 +31,6 @@ pub struct Node<'p> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum NodeProperty {
     Color,
-    Rbind,
+    Rbind(Vec<u32>),
     Blob,
 }

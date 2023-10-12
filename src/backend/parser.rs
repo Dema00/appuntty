@@ -6,19 +6,19 @@ use std::str::FromStr;
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, take, take_till, take_until, take_while, take_while_m_n},
+    bytes::complete::{tag, take, take_till, take_until, take_while, take_while_m_n, is_a},
     character::{
         complete::char, complete::digit1, is_alphabetic, is_alphanumeric, is_digit, is_space,
     },
-    combinator::{map, map_res},
+    combinator::{map, map_res, value},
     multi::{fold_many0, many_till, separated_list1, many0},
-    sequence::{delimited, preceded, tuple, terminated},
+    sequence::{delimited, preceded, tuple, terminated, Tuple},
     IResult, Parser,
 };
 
 type TempRefID = Vec<u32>;
 
-pub fn parse_numbers(input: &str) -> IResult<&str, u32> {
+fn parse_numbers(input: &str) -> IResult<&str, u32> {
     map_res(digit1, u32::from_str)(input)
 }
 
@@ -34,31 +34,39 @@ fn blob(input: &str) -> IResult<&str, NodeProperty> {
     map(tag("blob"), |blob| NodeProperty::Blob).parse(input)
 }
 
+fn rbind(input: &str) -> IResult<&str, NodeProperty> {
+    preceded(
+        tag("rbind"),
+        delimited(
+            tag("["),
+            map(
+                separated_list1(tag(","), parse_numbers),
+                |vec| NodeProperty::Rbind(vec)),
+            tag("]"))
+    ).parse(input)
+}
+
 fn property(input: &str) -> IResult<&str, NodeProperty> {
     delimited(tag("<"),
-    alt((blob,)),
+    alt((blob, rbind)),
     tag(">")
     ).parse(input)
 }
 
 #[rustfmt::skip]
 fn word(input: &str) -> IResult<&str, &str> {
-    preceded(
-        many0(tag(" ")), 
-        terminated(
-                take_until(" "),tag(" ")
-            )
-    )
-    .parse(input)
+    take_until(" ").parse(input)
 }
 
 #[rustfmt::skip]
 fn node_element(input: &str) -> IResult<&str, NodeElement> {
-    alt(
-        (
-            map(uuid, |ref_id| NodeElement::TempRef(ref_id)),
-            map(property, |property| NodeElement::Property(property)),
-            map(word, |text| NodeElement::Word(text))
+    preceded(tag(" "),
+        alt(
+            (
+                map(uuid, |ref_id| NodeElement::TempRef(ref_id)),
+                map(property, |property| NodeElement::Property(property)),
+                map(word, |text| NodeElement::Word(text))
+            )
         )
     )
     .parse(input)
@@ -92,6 +100,8 @@ mod tests {
         parser::{uuid, node_content, blob, property, word},
     };
 
+    use super::rbind;
+
     #[test]
     fn uuid_test() {
         let res = uuid("#(1.2.3)");
@@ -105,6 +115,12 @@ mod tests {
     }
 
     #[test]
+    fn rbind_test() {
+        let res = rbind("rbind[0,1,2]");
+        assert_eq!(res, Ok(("",NodeProperty::Rbind(vec![0,1,2]))))
+    }
+
+    #[test]
     fn prop_test() {
         let res = property("<blob>");
         assert_eq!(res, Ok(("", NodeProperty::Blob)));
@@ -112,13 +128,13 @@ mod tests {
 
     #[test]
     fn word_test() {
-        let res = word(" word ");
-        assert_eq!(res, Ok(("", "word")))
+        let res = word("word ");
+        assert_eq!(res, Ok((" ", "word")))
     }
 
     #[test]
     fn node_contet_test() {
-        let res = node_content(" ciao #(1.2.3) eccomi sono io <blob>");
+        let res = node_content(" ciao #(1.2.3) eccomi sono io <blob> <rbind[0,1]>");
         assert_eq!(
             res,
             Ok((
@@ -129,7 +145,8 @@ mod tests {
                     NodeElement::Word("eccomi"),
                     NodeElement::Word("sono"),
                     NodeElement::Word("io"),
-                    NodeElement::Property(NodeProperty::Blob)
+                    NodeElement::Property(NodeProperty::Blob),
+                    NodeElement::Property(NodeProperty::Rbind(vec![0,1]))
                 ]
             ))
         );
