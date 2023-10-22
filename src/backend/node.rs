@@ -1,57 +1,73 @@
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct UUID<'p> {
-    pub parent: Option<&'p UUID<'p>>,
-    pub id: u32,
+use std::{
+    borrow::BorrowMut,
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
+
+#[derive(Debug, Clone)]
+pub struct UUID {
+    pub parent: Weak<RefCell<UUID>>,
+    pub id: usize,
 }
 
-
+impl UUID {
+    fn new(parent: Option<Rc<RefCell<UUID>>>, id: usize) -> Rc<RefCell<UUID>> {
+        Rc::new(RefCell::new(UUID {
+            parent: parent.map_or(Weak::new(), |parent| Rc::downgrade(&Rc::clone(&parent))),
+            id,
+        }))
+    }
+}
 //Da rimuovere, aggiungere Futures per la gestione degli UUID linkati
 #[derive(Debug, PartialEq, Eq)]
-pub enum NodeElement<'s>{    
+pub enum NodeElement<'s> {
     Word(&'s str),
-    TempBlob((String, Vec<u32>)),
-    TempRef(Vec<u32>),
-    Property(NodeProperty)
+    TempBlob((String, Vec<usize>)),
+    TempRef(Vec<usize>),
+    Property(NodeProperty),
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum NodeContent<'p> {
+#[derive(Debug)]
+pub enum NodeContent {
     Text(String),
-    Reference(UUID<'p>),
-    Blob((String, UUID<'p>)),
+    Reference(Weak<UUID>),
+    Blob((String, Weak<UUID>)),
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Node<'p> {
-    pub parent: Option<&'p Node<'p>>,
-    pub uuid: UUID<'p>,
-    pub cont: Vec<NodeContent<'p>>,
-    pub sons: Vec<Box<Node<'p>>>,
-    pub prop: Vec<NodeProperty>,
+#[derive(Debug)]
+pub struct Node {
+    pub parent: Weak<Box<RefCell<Node>>>,
+    pub uuid: Rc<RefCell<UUID>>,
+    pub cont: RefCell<Vec<NodeContent>>,
+    pub sons: RefCell<Vec<Rc<Box<RefCell<Node>>>>>,
+    pub prop: RefCell<Vec<NodeProperty>>,
 }
 
-impl<'p> Node<'p> {
-    pub fn new(parent: &'p Node) -> Self {
-        Node { 
-            parent: Some(parent),
-            uuid: UUID {
-                parent: Some(&parent.uuid),
-                id: parent.sons.len() as u32
-            },
-            cont: Vec::new(),
-            sons: Vec::new(),
-            prop: Vec::new() 
-        }
+impl Node {
+    fn new(parent: Option<Rc<Box<RefCell<Node>>>>) -> Rc<Box<RefCell<Self>>> {
+        Rc::new(Box::new(RefCell::new(Node {
+            parent: parent
+                .clone()
+                .map_or(Weak::new(), |parent| Rc::downgrade(&Rc::clone(&parent))),
+            uuid: parent.map_or(UUID::new(None, 0), |parent| {
+                UUID::new(Some(Rc::clone(&parent.borrow().uuid)),
+                parent.borrow().sons.borrow().len()
+            )
+            }),
+            cont: RefCell::new(Vec::new()),
+            sons: RefCell::new(Vec::new()),
+            prop: RefCell::new(Vec::new()),
+        })))
     }
 
-    pub fn root(&self) -> &Self {
-        self.parent.map_or(&self, |s| s.root())
+    fn add_child(&self, child: Rc<Box<RefCell<Node>>>) {
+        self.sons.borrow_mut().push(child)
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum NodeProperty {
     Color,
-    Rbind(Vec<u32>),
+    Rbind(Vec<usize>),
     Blob,
 }
