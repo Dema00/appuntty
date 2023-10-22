@@ -1,5 +1,4 @@
 use std::{
-    borrow::BorrowMut,
     cell::RefCell,
     rc::{Rc, Weak},
 };
@@ -9,9 +8,14 @@ pub struct UUID {
     pub parent: Weak<RefCell<UUID>>,
     pub id: RefCell<usize>,
 }
+//type aliases for legibility
+
+type Ref<T> = Rc<RefCell<T>>; //Reference counted refcell
+type HRef<T> = Rc<Box<RefCell<T>>>; //Reference counted heap refcell
+type WHRef<T> = Weak<Box<RefCell<T>>>; //Weakly reference counted heap refcell
 
 impl UUID {
-    fn new(parent: Option<Rc<RefCell<UUID>>>, id: usize) -> Rc<RefCell<UUID>> {
+    fn new(parent: Option<Ref<UUID>>, id: usize) -> Ref<UUID> {
         Rc::new(RefCell::new(UUID {
             parent: parent.map_or(Weak::new(), |parent| Rc::downgrade(&Rc::clone(&parent))),
             id: RefCell::new(id),
@@ -40,15 +44,15 @@ pub enum NodeContent {
 
 #[derive(Debug)]
 pub struct Node {
-    pub parent: Weak<Box<RefCell<Node>>>,
-    pub uuid: Rc<RefCell<UUID>>,
+    pub parent: WHRef<Node>,
+    pub uuid: Ref<UUID>,
     pub cont: RefCell<Vec<NodeContent>>,
-    pub sons: RefCell<Vec<Rc<Box<RefCell<Node>>>>>,
+    pub sons: RefCell<Vec<HRef<Node>>>,
     pub prop: RefCell<Vec<NodeProperty>>,
 }
 
 impl Node {
-    fn new(parent: Option<Rc<Box<RefCell<Node>>>>) -> Rc<Box<RefCell<Self>>> {
+    fn new(parent: Option<HRef<Node>>) -> HRef<Self> {
         Rc::new(Box::new(RefCell::new(Node {
             parent: parent
                 .clone()
@@ -65,11 +69,11 @@ impl Node {
         })))
     }
 
-    fn push_child(&self, child: Rc<Box<RefCell<Node>>>) {
+    fn push_child(&self, child: HRef<Node>) {
         self.sons.borrow_mut().push(child)
     }
 
-    fn insert_child(&self, idx: usize, child: Rc<Box<RefCell<Node>>>) {
+    fn insert_child(&self, idx: usize, child: HRef<Node>) {
         self.sons.borrow_mut().insert(idx, child);
         self.update_child_ids()
     }
