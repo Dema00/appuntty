@@ -7,15 +7,19 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct UUID {
     pub parent: Weak<RefCell<UUID>>,
-    pub id: usize,
+    pub id: RefCell<usize>,
 }
 
 impl UUID {
     fn new(parent: Option<Rc<RefCell<UUID>>>, id: usize) -> Rc<RefCell<UUID>> {
         Rc::new(RefCell::new(UUID {
             parent: parent.map_or(Weak::new(), |parent| Rc::downgrade(&Rc::clone(&parent))),
-            id,
+            id: RefCell::new(id),
         }))
+    }
+
+    fn update_id(&self, new_id: usize) {
+        *self.id.borrow_mut() = new_id;
     }
 }
 //Da rimuovere, aggiungere Futures per la gestione degli UUID linkati
@@ -50,9 +54,10 @@ impl Node {
                 .clone()
                 .map_or(Weak::new(), |parent| Rc::downgrade(&Rc::clone(&parent))),
             uuid: parent.map_or(UUID::new(None, 0), |parent| {
-                UUID::new(Some(Rc::clone(&parent.borrow().uuid)),
-                parent.borrow().sons.borrow().len()
-            )
+                UUID::new(
+                    Some(Rc::clone(&parent.borrow().uuid)),
+                    parent.borrow().sons.borrow().len(),
+                )
             }),
             cont: RefCell::new(Vec::new()),
             sons: RefCell::new(Vec::new()),
@@ -60,8 +65,23 @@ impl Node {
         })))
     }
 
-    fn add_child(&self, child: Rc<Box<RefCell<Node>>>) {
+    fn push_child(&self, child: Rc<Box<RefCell<Node>>>) {
         self.sons.borrow_mut().push(child)
+    }
+
+    fn insert_child(&self, idx: usize, child: Rc<Box<RefCell<Node>>>) {
+        self.sons.borrow_mut().insert(idx, child);
+        self.update_child_ids()
+    }
+
+    fn update_child_ids(&self) {
+        self.sons
+            .borrow_mut()
+            .iter_mut()
+            .fold(0, |count: usize, a| {
+                a.borrow().uuid.borrow().update_id(count);
+                count + 1
+            });
     }
 }
 
