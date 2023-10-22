@@ -10,9 +10,9 @@ pub struct UUID {
 }
 //type aliases for legibility
 
-type Ref<T> = Rc<RefCell<T>>; //Reference counted refcell
-type HRef<T> = Rc<Box<RefCell<T>>>; //Reference counted heap refcell
-type WHRef<T> = Weak<Box<RefCell<T>>>; //Weakly reference counted heap refcell
+pub type Ref<T> = Rc<RefCell<T>>; //Reference counted refcell
+pub type HRef<T> = Rc<Box<RefCell<T>>>; //Reference counted heap refcell
+pub type WHRef<T> = Weak<Box<RefCell<T>>>; //Weakly reference counted heap refcell
 
 impl UUID {
     fn new(parent: Option<Ref<UUID>>, id: usize) -> Ref<UUID> {
