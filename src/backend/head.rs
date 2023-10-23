@@ -49,7 +49,6 @@ impl<'i, 't> Compare<&'t str> for Head<'i> {
     }
 }
 
-
 impl<'i> ExtendInto for Head<'i> {
     type Item = char;
 
@@ -119,8 +118,7 @@ impl<'i> InputTake for Head<'i> {
     fn take_split(&self, count: usize) -> (Self, Self) {
         let (prefix, suffix) = self.input.split_at(count);
 
-        (self.clone_new_str(suffix),
-        self.clone_new_str(prefix))
+        (self.clone_new_str(suffix), self.clone_new_str(prefix))
     }
 }
 //  VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV
@@ -128,78 +126,102 @@ impl<'i> InputTake for Head<'i> {
 impl<'i> InputTakeAtPosition for Head<'i> {
     type Item = char;
 
-    fn split_at_position<P, E: nom::error::ParseError<Self>>(&self, predicate: P) -> nom::IResult<Self, Self, E>
-      where
-        P: Fn(Self::Item) -> bool {
-
+    fn split_at_position<P, E: nom::error::ParseError<Self>>(
+        &self,
+        predicate: P,
+    ) -> nom::IResult<Self, Self, E>
+    where
+        P: Fn(Self::Item) -> bool,
+    {
         match self.input.find(predicate) {
             // find() returns a byte index that is already in the slice at a char boundary
-            Some(i) => unsafe { Ok((self.clone_new_str(self.input.get_unchecked(i..)), self.clone_new_str(self.input.get_unchecked(..i)))) },
+            Some(i) => unsafe {
+                Ok((
+                    self.clone_new_str(self.input.get_unchecked(i..)),
+                    self.clone_new_str(self.input.get_unchecked(..i)),
+                ))
+            },
             None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
-          }
+        }
     }
 
     fn split_at_position1<P, E: nom::error::ParseError<Self>>(
         &self,
         predicate: P,
         e: nom::error::ErrorKind,
-      ) -> nom::IResult<Self, Self, E>
-      where
-        P: Fn(Self::Item) -> bool {
-            match self.input.find(predicate) {
-                Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
-                // find() returns a byte index that is already in the slice at a char boundary
-                Some(i) => unsafe { Ok((self.clone_new_str(self.input.get_unchecked(i..)), self.clone_new_str(self.input.get_unchecked(..i)))) },
-                None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
-              }
-          
+    ) -> nom::IResult<Self, Self, E>
+    where
+        P: Fn(Self::Item) -> bool,
+    {
+        match self.input.find(predicate) {
+            Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
+            // find() returns a byte index that is already in the slice at a char boundary
+            Some(i) => unsafe {
+                Ok((
+                    self.clone_new_str(self.input.get_unchecked(i..)),
+                    self.clone_new_str(self.input.get_unchecked(..i)),
+                ))
+            },
+            None => Err(nom::Err::Incomplete(nom::Needed::new(1))),
+        }
     }
 
     fn split_at_position_complete<P, E: nom::error::ParseError<Self>>(
         &self,
         predicate: P,
-      ) -> nom::IResult<Self, Self, E>
-      where
-        P: Fn(Self::Item) -> bool {
-            match self.input.find(predicate) {
-                // find() returns a byte index that is already in the slice at a char boundary
-                Some(i) => unsafe { Ok((self.clone_new_str(self.input.get_unchecked(i..)), self.clone_new_str(self.input.get_unchecked(..i)))) },
-                // the end of slice is a char boundary
-                None => unsafe {
-                  Ok((
+    ) -> nom::IResult<Self, Self, E>
+    where
+        P: Fn(Self::Item) -> bool,
+    {
+        match self.input.find(predicate) {
+            // find() returns a byte index that is already in the slice at a char boundary
+            Some(i) => unsafe {
+                Ok((
+                    self.clone_new_str(self.input.get_unchecked(i..)),
+                    self.clone_new_str(self.input.get_unchecked(..i)),
+                ))
+            },
+            // the end of slice is a char boundary
+            None => unsafe {
+                Ok((
                     self.clone_new_str(self.input.get_unchecked(self.input.len()..)),
                     self.clone_new_str(self.input.get_unchecked(..self.input.len())),
-                  ))
-                },
-              }
+                ))
+            },
+        }
     }
 
     fn split_at_position1_complete<P, E: nom::error::ParseError<Self>>(
         &self,
         predicate: P,
         e: nom::error::ErrorKind,
-      ) -> nom::IResult<Self, Self, E>
-      where
-        P: Fn(Self::Item) -> bool {
-            match self.input.find(predicate) {
-                Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
-                // find() returns a byte index that is already in the slice at a char boundary
-                Some(i) => unsafe { Ok((self.clone_new_str(self.input.get_unchecked(i..)), self.clone_new_str(self.input.get_unchecked(..i)))) },
-                None => {
-                  if self.input.is_empty() {
+    ) -> nom::IResult<Self, Self, E>
+    where
+        P: Fn(Self::Item) -> bool,
+    {
+        match self.input.find(predicate) {
+            Some(0) => Err(nom::Err::Error(E::from_error_kind(self.clone(), e))),
+            // find() returns a byte index that is already in the slice at a char boundary
+            Some(i) => unsafe {
+                Ok((
+                    self.clone_new_str(self.input.get_unchecked(i..)),
+                    self.clone_new_str(self.input.get_unchecked(..i)),
+                ))
+            },
+            None => {
+                if self.input.is_empty() {
                     Err(nom::Err::Error(E::from_error_kind(self.clone(), e)))
-                  } else {
+                } else {
                     // the end of slice is a char boundary
                     unsafe {
-                      Ok((
-                        self.clone_new_str(self.input.get_unchecked(self.input.len()..)),
-                        self.clone_new_str(self.input.get_unchecked(..self.input.len())),
-                      ))
+                        Ok((
+                            self.clone_new_str(self.input.get_unchecked(self.input.len()..)),
+                            self.clone_new_str(self.input.get_unchecked(..self.input.len())),
+                        ))
                     }
-                  }
                 }
-              }
-          
+            }
+        }
     }
 }
 

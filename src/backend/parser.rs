@@ -2,22 +2,26 @@ extern crate nom;
 
 use crate::backend::node::NodeContent;
 
-use super::node::{Node, SRef, WHRef, NodeElement, NodeProperty, UUID, HRef, WSRef};
+use super::node::{HRef, Node, NodeElement, NodeProperty, SRef, WHRef, WSRef, UUID};
 
 use core::panic;
-use std::{pin::Pin, str::FromStr, rc::{Rc, Weak}};
+use std::{
+    pin::Pin,
+    rc::{Rc, Weak},
+    str::FromStr,
+};
 
 use nom::{
     branch::alt,
     bytes::complete::{is_a, tag, take, take_till, take_until, take_while, take_while_m_n},
     character::{
         complete::char,
-        complete::{digit1, multispace0, newline, one_of},
+        complete::{digit1, multispace0, multispace1, newline, one_of},
         is_alphabetic, is_alphanumeric, is_digit, is_space,
     },
     combinator::{map, map_res, peek, value},
     error::{Error, ParseError},
-    multi::{count, fold_many0, many0, many0_count, many_till, separated_list1},
+    multi::{count, fold_many0, many0, many0_count, many_till, separated_list0, separated_list1},
     sequence::{delimited, pair, preceded, terminated, tuple, Tuple},
     IResult, Parser,
 };
@@ -81,8 +85,6 @@ fn word(input: &str) -> IResult<&str, &str> {
 
 #[rustfmt::skip]
 fn node_element(input: &str) -> IResult<&str, NodeElement> {
-    println!("{}",String::from(input));
-    ws(
         alt(
             (
                 map(uuid, |ref_id| NodeElement::TempRef(ref_id)),
@@ -91,53 +93,66 @@ fn node_element(input: &str) -> IResult<&str, NodeElement> {
                 map(word, |text| NodeElement::Word(text))
             )
         )
+    .parse(input)
+}
+/*node_element,
+Vec::new,
+|mut contents: Vec<NodeElement>, fragment| {
+    contents.push(fragment);
+    println!("{:?}",contents);
+    contents
+},*/
+fn node_content(input: &str) -> IResult<&str, Vec<NodeElement>> {
+    preceded(
+        char('-'),
+        terminated(
+            map(isolate_contents, |elements| {
+                elements
+                    .into_iter()
+                    .filter(|el| {
+                        if let NodeElement::Word(iel) = el {
+                            !iel.is_empty()
+                        } else {
+                            true
+                        }
+                    })
+                    .collect()
+            }),
+            newline,
+        ),
     )
     .parse(input)
 }
 
-fn node_content(input: &str) -> IResult<&str, Vec<NodeElement>> {
-    delimited(tag("-"),
-        fold_many0(
-        node_element,
-        Vec::new,
-        |mut contents: Vec<NodeElement>, fragment| {
-            contents.push(fragment);
-            println!("{:?}",contents);
-            contents
-        },
-    ),
-    newline
-    )
-    .parse(input)
+fn isolate_contents(input: &str) -> IResult<&str, Vec<NodeElement>> {
+    let (input, isolated) = take_until("\n").parse(input)?;
+    let (_, elements) = separated_list1(multispace1, node_element).parse(isolated)?;
+    Ok((input, elements))
 }
 
 fn get_depth<'i>(input: &'i str) -> IResult<&'i str, usize> {
-    peek(delimited(newline, many0_count(tag(" ")), tag("-"))).parse(input)
+    peek(delimited(many0(newline), many0_count(tag(" ")), tag("-"))).parse(input)
 }
 
 fn node(input: &str, parent: HRef<Node>) -> IResult<&str, HRef<Node>> {
-    println!("entrato");
     let (_, depth) = get_depth.parse(input)?;
-    println!("depth");
-    let (mut input, contents) = preceded(
-        delimited(many0(newline), many0(tag(" ")), tag("-")),
-        node_content
-    ).parse(input)?;
-    println!("diocan");
+
+    let (mut input, contents) =
+        preceded(preceded(many0(newline), take_until("-")), node_content).parse(input)?;
 
     let new_node = Node::new(Some(Rc::clone(&parent)));
     populate_node(Rc::clone(&new_node), contents);
 
-    print!("{:?}", new_node);
+    if !input.is_empty() {
+        let (_, mut next_depth) = get_depth.parse(input)?;
 
-    let (_, mut next_depth) = get_depth.parse(input)?;
+        while depth < next_depth && !input.is_empty() {
+            let child_node;
+            (input, child_node) = node(input, Rc::clone(&new_node))?;
+            new_node.borrow_mut().push_child(child_node);
 
-    while depth < next_depth && !input.is_empty(){
-        let child_node;
-        (input, child_node) = node(input, Rc::clone(&new_node))?;
-        new_node.borrow_mut().push_child(child_node);
-
-        (_, next_depth) = get_depth.parse(input)?;
+            if !input.is_empty() {(_, next_depth) = get_depth.parse(input)?;}
+        }
     }
 
     IResult::Ok((input, new_node))
@@ -149,7 +164,9 @@ fn populate_node(node: HRef<Node>, contents: Vec<NodeElement>) {
         match element {
             NodeElement::Word(word) => node.push_content(NodeContent::Text(String::from(word))),
             NodeElement::Property(property) => node.push_property(property),
-            NodeElement::TempBlob((word, addr)) => node.push_content(NodeContent::Blob((word,get_uuid(addr)))),
+            NodeElement::TempBlob((word, addr)) => {
+                node.push_content(NodeContent::Blob((word, get_uuid(addr))))
+            }
             NodeElement::TempRef(addr) => node.push_content(NodeContent::Reference(get_uuid(addr))),
         }
     }
@@ -167,8 +184,8 @@ fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Par
 #[cfg(test)]
 mod tests {
     use crate::backend::{
-        node::{Node, NodeContent, NodeElement, NodeProperty, UUID},
-        parser::{blob, node_content, prop_blob, prop_rbind, property, uuid, word, get_depth},
+        node::{Node, NodeContent, NodeElement, NodeProperty, UUID, HRef},
+        parser::{blob, get_depth, node_content, prop_blob, prop_rbind, property, uuid, word},
     };
 
     use super::node;
@@ -217,7 +234,7 @@ mod tests {
 
     #[test]
     fn node_contet_test() {
-        let res = node_content("- ciao #(1.2.3) {eccomi}(1.2.3) sono io <blob> <rbind[0,1]>\n      hh a");
+        let res = node_content("- ciao #(1.2.3) {eccomi}(1.2.3) sono io <blob> <rbind[0,1]>\n");
         assert_eq!(
             res,
             Ok((
@@ -238,10 +255,33 @@ mod tests {
     #[test]
     fn node_test() {
         let root = Node::new(None);
-        let res = node(
-            "- Padre \n - Figlio \n  - Spirito santo \n - Amen ",
-        root);
+        let res = node("- Padre \n - Figlio \n  - Spirito santo \n - Amen \n - Questo \n - E' \n - Un \n - Test \n", root);
 
-        print!("{:?}", res.unwrap().1)
+        fn print_node(node: HRef<Node>, depth: usize) {
+            print!("- ");
+
+            print!("({})",node.borrow().uuid.borrow().id.borrow());
+
+            for content in node.borrow_mut().cont.get_mut() {
+                match content {
+                    NodeContent::Text(text) => print!("{} ", text),
+                    _ => (),
+                }
+            }
+
+            print!("\n");
+
+            for son in node.borrow_mut().sons.get_mut() {
+                for i in 0..depth {
+                    print!(" ");
+                }
+                print_node(son.to_owned(), depth + 1);
+            }
+            
+        }
+
+        print_node(res.unwrap().1,1);
+
+        assert!(false);
     }
 }
