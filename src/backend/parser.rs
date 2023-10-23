@@ -151,7 +151,9 @@ fn node(input: &str, parent: HRef<Node>) -> IResult<&str, HRef<Node>> {
             (input, child_node) = node(input, Rc::clone(&new_node))?;
             new_node.borrow_mut().push_child(child_node);
 
-            if !input.is_empty() {(_, next_depth) = get_depth.parse(input)?;}
+            if !input.is_empty() {
+                (_, next_depth) = get_depth.parse(input)?;
+            }
         }
     }
 
@@ -184,7 +186,7 @@ fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Par
 #[cfg(test)]
 mod tests {
     use crate::backend::{
-        node::{Node, NodeContent, NodeElement, NodeProperty, UUID, HRef},
+        node::{HRef, Node, NodeContent, NodeElement, NodeProperty, UUID},
         parser::{blob, get_depth, node_content, prop_blob, prop_rbind, property, uuid, word},
     };
 
@@ -255,32 +257,12 @@ mod tests {
     #[test]
     fn node_test() {
         let root = Node::new(None);
-        let res = node("- Padre \n - Figlio \n  - Spirito santo \n - Amen \n - Questo \n - E' \n - Un \n - Test \n", root);
+        let res = node(
+            "- A \n - A.A \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
+            root,
+        );
 
-        fn print_node(node: HRef<Node>, depth: usize) {
-            print!("- ");
-
-            print!("({})",node.borrow().uuid.borrow().id.borrow());
-
-            for content in node.borrow_mut().cont.get_mut() {
-                match content {
-                    NodeContent::Text(text) => print!("{} ", text),
-                    _ => (),
-                }
-            }
-
-            print!("\n");
-
-            for son in node.borrow_mut().sons.get_mut() {
-                for i in 0..depth {
-                    print!(" ");
-                }
-                print_node(son.to_owned(), depth + 1);
-            }
-            
-        }
-
-        print_node(res.unwrap().1,1);
+        println!("{}", res.unwrap().1.borrow());
 
         assert!(false);
     }

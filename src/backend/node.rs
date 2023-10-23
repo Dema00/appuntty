@@ -1,5 +1,8 @@
+use core::fmt;
 use std::{
+    borrow::BorrowMut,
     cell::RefCell,
+    fmt::write,
     rc::{Rc, Weak},
 };
 
@@ -8,6 +11,7 @@ pub struct UUID {
     pub parent: Weak<RefCell<UUID>>,
     pub id: RefCell<usize>,
 }
+
 //type aliases for legibility
 
 pub type SRef<T> = Rc<RefCell<T>>; //Reference counted refcell
@@ -52,6 +56,34 @@ pub struct Node {
     pub prop: RefCell<Vec<NodeProperty>>,
 }
 
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "- ")?;
+
+        write!(f, "({}) ", self.uuid.borrow().id.borrow())?;
+
+        for content in self.cont.borrow().iter() {
+            match content {
+                NodeContent::Text(text) => write!(f, "{} ", text),
+                NodeContent::Blob((text, _)) => write!(f, "{{ {} }} ", text),
+                NodeContent::Reference(uuid) => write!(f, "(ref)"),
+            }?
+        }
+
+        write!(f, "\n")?;
+
+        for son in self.sons.borrow().iter() {
+            write!(
+                f,
+                "{}{}",
+                (0..self.get_depth()).map(|_| " ").collect::<String>(),
+                son.borrow()
+            )?;
+        }
+        Ok(())
+    }
+}
+
 impl Node {
     pub fn new(parent: Option<HRef<Node>>) -> HRef<Self> {
         Rc::new(Box::new(RefCell::new(Node {
@@ -89,6 +121,17 @@ impl Node {
     pub fn insert_child(&self, idx: usize, child: HRef<Node>) {
         self.sons.borrow_mut().insert(idx, child);
         self.update_child_ids()
+    }
+
+    pub fn get_depth(&self) -> usize {
+        let mut p = self.parent.upgrade();
+        let mut depth = 0;
+
+        while p.is_some() {
+            p = p.unwrap().borrow().parent.upgrade();
+            depth += 1;
+        }
+        depth + 1
     }
 
     pub fn update_child_ids(&self) {
