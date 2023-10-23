@@ -2,10 +2,10 @@ extern crate nom;
 
 use crate::backend::node::NodeContent;
 
-use super::node::{Node, NodeElement, NodeProperty, UUID};
+use super::node::{Node, SRef, WHRef, NodeElement, NodeProperty, UUID, HRef, WSRef};
 
 use core::panic;
-use std::{pin::Pin, str::FromStr};
+use std::{pin::Pin, str::FromStr, rc::{Rc, Weak}};
 
 use nom::{
     branch::alt,
@@ -81,6 +81,7 @@ fn word(input: &str) -> IResult<&str, &str> {
 
 #[rustfmt::skip]
 fn node_element(input: &str) -> IResult<&str, NodeElement> {
+    println!("{}",String::from(input));
     ws(
         alt(
             (
@@ -95,33 +96,69 @@ fn node_element(input: &str) -> IResult<&str, NodeElement> {
 }
 
 fn node_content(input: &str) -> IResult<&str, Vec<NodeElement>> {
-    fold_many0(
+    delimited(tag("-"),
+        fold_many0(
         node_element,
         Vec::new,
         |mut contents: Vec<NodeElement>, fragment| {
             contents.push(fragment);
+            println!("{:?}",contents);
             contents
         },
+    ),
+    newline
     )
     .parse(input)
 }
 
 fn get_depth<'i>(input: &'i str) -> IResult<&'i str, usize> {
-    delimited(newline, many0_count(tag(" ")), tag("-")).parse(input)
+    peek(delimited(newline, many0_count(tag(" ")), tag("-"))).parse(input)
 }
 
-/*fn build_node_with_contents<'p>(parent: &'p mut Node<'p>, contents: Vec<NodeElement>) -> Node<'p> {
-    let mut node = Node::new(parent);
+fn node(input: &str, parent: HRef<Node>) -> IResult<&str, HRef<Node>> {
+    println!("entrato");
+    let (_, depth) = get_depth.parse(input)?;
+    println!("depth");
+    let (mut input, contents) = preceded(
+        delimited(many0(newline), many0(tag(" ")), tag("-")),
+        node_content
+    ).parse(input)?;
+    println!("diocan");
+
+    let new_node = Node::new(Some(Rc::clone(&parent)));
+    populate_node(Rc::clone(&new_node), contents);
+
+    print!("{:?}", new_node);
+
+    let (_, mut next_depth) = get_depth.parse(input)?;
+
+    while depth < next_depth && !input.is_empty(){
+        let child_node;
+        (input, child_node) = node(input, Rc::clone(&new_node))?;
+        new_node.borrow_mut().push_child(child_node);
+
+        (_, next_depth) = get_depth.parse(input)?;
+    }
+
+    IResult::Ok((input, new_node))
+}
+
+fn populate_node(node: HRef<Node>, contents: Vec<NodeElement>) {
+    let node = node.borrow_mut();
     for element in contents {
         match element {
-            NodeElement::Word(word) => node.cont.push(NodeContent::Text(String::from(word))),
-            NodeElement::Property(property) => node.prop.push(property),
-            NodeElement::TempBlob((word, addr)) => node.cont.push(NodeContent::Blob((word,get_uuid(node.parent.unwrap().root(), &addr)))),
-            NodeElement::TempRef(addr) => node.cont.push(NodeContent::Reference(get_uuid(node.parent.unwrap().root(), &addr))),
+            NodeElement::Word(word) => node.push_content(NodeContent::Text(String::from(word))),
+            NodeElement::Property(property) => node.push_property(property),
+            NodeElement::TempBlob((word, addr)) => node.push_content(NodeContent::Blob((word,get_uuid(addr)))),
+            NodeElement::TempRef(addr) => node.push_content(NodeContent::Reference(get_uuid(addr))),
         }
     }
-    node
-}*/
+}
+
+fn get_uuid(addr_vec: TempRefID) -> WSRef<UUID> {
+    let uuid = UUID::new(None, addr_vec[0]);
+    Rc::downgrade(&Rc::new(uuid))
+}
 
 fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Parser<&'a str, O, E> {
     delimited(multispace0, f, multispace0)
@@ -131,8 +168,10 @@ fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Par
 mod tests {
     use crate::backend::{
         node::{Node, NodeContent, NodeElement, NodeProperty, UUID},
-        parser::{blob, node_content, prop_blob, prop_rbind, property, uuid, word},
+        parser::{blob, node_content, prop_blob, prop_rbind, property, uuid, word, get_depth},
     };
+
+    use super::node;
 
     #[test]
     fn uuid_test() {
@@ -171,8 +210,14 @@ mod tests {
     }
 
     #[test]
+    fn get_depth_test() {
+        let res = get_depth("\n  -");
+        assert_eq!(res, Ok(("\n  -", 2)))
+    }
+
+    #[test]
     fn node_contet_test() {
-        let res = node_content(" ciao #(1.2.3) {eccomi}(1.2.3) sono io <blob> <rbind[0,1]>");
+        let res = node_content("- ciao #(1.2.3) {eccomi}(1.2.3) sono io <blob> <rbind[0,1]>\n      hh a");
         assert_eq!(
             res,
             Ok((
@@ -188,5 +233,15 @@ mod tests {
                 ]
             ))
         );
+    }
+
+    #[test]
+    fn node_test() {
+        let root = Node::new(None);
+        let res = node(
+            "- Padre \n - Figlio \n  - Spirito santo \n - Amen ",
+        root);
+
+        print!("{:?}", res.unwrap().1)
     }
 }
