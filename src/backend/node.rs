@@ -12,12 +12,29 @@ pub struct UUID {
     pub id: RefCell<usize>,
 }
 
-//type aliases for legibility
+impl PartialEq for UUID {
+    fn eq(&self, other: &Self) -> bool {
+        self.parent.upgrade() == other.parent.upgrade() && self.id == other.id
+    }
+}
 
-pub type SRef<T> = Rc<RefCell<T>>; //Reference counted refcell
-pub type WSRef<T> = Weak<Rc<RefCell<T>>>; //Weakly reference counted refcell
-pub type HRef<T> = Rc<Box<RefCell<T>>>; //Reference counted heap refcell
-pub type WHRef<T> = Weak<Box<RefCell<T>>>; //Weakly reference counted heap refcell
+impl Eq for UUID {}
+
+impl fmt::Display for UUID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.to_vec_id().iter().fold(String::new(), |string, id| {
+                if string.is_empty() {
+                    format!("{}", id)
+                } else {
+                    format!("{}.{}", string, id)
+                }
+            })
+        )
+    }
+}
 
 impl UUID {
     pub fn new(parent: Option<SRef<UUID>>, id: usize) -> SRef<UUID> {
@@ -30,7 +47,28 @@ impl UUID {
     fn update_id(&self, new_id: usize) {
         *self.id.borrow_mut() = new_id;
     }
+
+    pub fn to_vec_id(&self) -> Vec<usize> {
+        let mut p = self.parent.upgrade();
+        let mut id = vec![self.id.clone().into_inner()];
+
+        while let Some(pin) = p {
+            id.push(pin.borrow().id.clone().into_inner());
+            p = pin.borrow().parent.upgrade();
+        }
+
+        id.reverse();
+        id
+    }
 }
+
+//type aliases for legibility
+
+pub type SRef<T> = Rc<RefCell<T>>; //Reference counted refcell
+pub type WSRef<T> = Weak<RefCell<T>>; //Weakly reference counted refcell
+pub type HRef<T> = Rc<Box<RefCell<T>>>; //Reference counted heap refcell
+pub type WHRef<T> = Weak<Box<RefCell<T>>>; //Weakly reference counted heap refcell
+
 //Da rimuovere, aggiungere Futures per la gestione degli UUID linkati
 #[derive(Debug, PartialEq, Eq)]
 pub enum NodeElement<'s> {
@@ -58,15 +96,25 @@ pub struct Node {
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "- ")?;
+        write!(f, "{}", "- ")?;
 
-        write!(f, "({}) ", self.uuid.borrow().id.borrow())?;
+        write!(f, "({}) ", self.uuid.borrow())?;
 
         for content in self.cont.borrow().iter() {
             match content {
                 NodeContent::Text(text) => write!(f, "{} ", text),
-                NodeContent::Blob((text, _)) => write!(f, "{{ {} }} ", text),
-                NodeContent::Reference(uuid) => write!(f, "(ref)"),
+                NodeContent::Blob((text, _)) => write!(f, "blob({}) ", text),
+                NodeContent::Reference(uuid) => uuid
+                    .upgrade()
+                    .map_or(write!(f, "None"), |uuid| write!(f, "{}", uuid.borrow())),
+            }?
+        }
+
+        for property in self.prop.borrow().iter() {
+            match property {
+                NodeProperty::Blob => write!(f, "<blob>"),
+                NodeProperty::Color => write!(f, "<colored>"),
+                NodeProperty::Rbind(_) => write!(f, "<rbind>"),
             }?
         }
 
@@ -142,6 +190,53 @@ impl Node {
                 a.borrow().uuid.borrow().update_id(count);
                 count + 1
             });
+    }
+
+    pub fn go_up(&self, mut amount: usize) -> Option<HRef<Node>> {
+        let mut p = self.parent.upgrade();
+
+        while let Some(pin) = p {
+            if amount == 0 {
+                return Some(pin);
+            }
+            amount -= 1;
+            p = pin.borrow().parent.upgrade()
+        }
+
+        None
+    }
+
+    pub fn go_down(&self, addr: Vec<usize>) -> Option<HRef<Node>> {
+
+        if addr.is_empty() {
+            return None;
+        }
+        if addr.len() == 1 {
+            self.sons.borrow().get(addr[0]).map_or(None, |node| Some(Rc::clone(node)))
+        } else {
+            self.sons.borrow().get(addr[0]).map_or(None, |node| node.borrow().go_down(addr[1..].to_vec()))
+        }
+    }
+
+    pub fn node_from_UUID(&self, uuid: SRef<UUID>) -> Option<HRef<Node>> {
+        let v_id_other = uuid.borrow().to_vec_id();
+        
+        self.node_from_vec_id(v_id_other)
+    }
+
+    pub fn node_from_vec_id(&self, addr: Vec<usize>) -> Option<HRef<Node>> {
+
+        let v_id_self = self.uuid.borrow().to_vec_id();
+
+        let shared_addr_len: usize = v_id_self.iter().zip(addr.clone()).fold(0,|c,(&s, o)| if s == o {c + 1} else {c});
+
+        let distance_from_shared_addr = (shared_addr_len).abs_diff(v_id_self.len());
+
+        let starting_node = self.go_up(distance_from_shared_addr)?;
+
+        let return_node = starting_node.borrow().go_down(addr[shared_addr_len..].to_vec());
+
+        return_node
     }
 }
 

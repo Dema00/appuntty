@@ -95,13 +95,7 @@ fn node_element(input: &str) -> IResult<&str, NodeElement> {
         )
     .parse(input)
 }
-/*node_element,
-Vec::new,
-|mut contents: Vec<NodeElement>, fragment| {
-    contents.push(fragment);
-    println!("{:?}",contents);
-    contents
-},*/
+
 fn node_content(input: &str) -> IResult<&str, Vec<NodeElement>> {
     preceded(
         char('-'),
@@ -134,13 +128,12 @@ fn get_depth<'i>(input: &'i str) -> IResult<&'i str, usize> {
     peek(delimited(many0(newline), many0_count(tag(" ")), tag("-"))).parse(input)
 }
 
-fn node(input: &str, parent: HRef<Node>) -> IResult<&str, HRef<Node>> {
+fn node(input: &str, parent: Option<HRef<Node>>) -> IResult<&str, HRef<Node>> {
     let (_, depth) = get_depth.parse(input)?;
 
-    let (mut input, contents) =
-        preceded(preceded(many0(newline), take_until("-")), node_content).parse(input)?;
+    let (mut input, contents) = preceded(multispace0, node_content).parse(input)?;
 
-    let new_node = Node::new(Some(Rc::clone(&parent)));
+    let new_node = Node::new(parent.map_or(None, |parent_inner| Some(Rc::clone(&parent_inner))));
     populate_node(Rc::clone(&new_node), contents);
 
     if !input.is_empty() {
@@ -148,7 +141,7 @@ fn node(input: &str, parent: HRef<Node>) -> IResult<&str, HRef<Node>> {
 
         while depth < next_depth && !input.is_empty() {
             let child_node;
-            (input, child_node) = node(input, Rc::clone(&new_node))?;
+            (input, child_node) = node(input, Some(Rc::clone(&new_node)))?;
             new_node.borrow_mut().push_child(child_node);
 
             if !input.is_empty() {
@@ -176,7 +169,7 @@ fn populate_node(node: HRef<Node>, contents: Vec<NodeElement>) {
 
 fn get_uuid(addr_vec: TempRefID) -> WSRef<UUID> {
     let uuid = UUID::new(None, addr_vec[0]);
-    Rc::downgrade(&Rc::new(uuid))
+    Rc::downgrade(&uuid)
 }
 
 fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Parser<&'a str, O, E> {
@@ -256,14 +249,20 @@ mod tests {
 
     #[test]
     fn node_test() {
-        let root = Node::new(None);
         let res = node(
-            "- A \n - A.A \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
-            root,
+            "- A \n - A.A {a.a}(0.0) \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
+            None,
         );
 
-        println!("{}", res.unwrap().1.borrow());
+        let (out, res) = res.unwrap();
 
-        assert!(false);
+        print!("{}", out);
+
+        println!("{}", res.borrow());
+
+        assert_eq!(
+            format!("{}", res.borrow()),
+            "- (0) A \n - (0.0) A.A blob(a.a) \n  - (0.0.0) A.A.A \n  - (0.0.1) A.A.B \n - (0.1) A.B \n  - (0.1.0) A.B.A \n"
+        );
     }
 }
