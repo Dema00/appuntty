@@ -79,7 +79,7 @@ pub enum NodeElement<'s> {
     Property(NodeProperty),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NodeContent {
     Text(String),
     Reference(WSRef<UUID>),
@@ -97,6 +97,14 @@ pub struct Node {
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+
+        fn print_uuid(uuid: &WSRef<UUID>) -> String {
+            match uuid.upgrade() {
+                Some(uuid) => format!("{}",uuid.borrow()),
+                None => format!("No Reference)"),
+            }
+        }
+
         write!(f, "{}", "- ")?;
 
         write!(f, "({}) ", self.uuid.borrow())?;
@@ -104,11 +112,8 @@ impl fmt::Display for Node {
         for content in self.cont.borrow().iter() {
             match content {
                 NodeContent::Text(text) => write!(f, "{} ", text),
-                NodeContent::Blob((text, _)) => write!(f, "blob({}) ", text),
-                NodeContent::Reference(uuid) => match uuid.upgrade() {
-                    Some(uuid) => write!(f, "#({})", uuid.borrow()),
-                    None => write!(f, "#(No Reference)"),
-                },
+                NodeContent::Blob((text, uuid)) => write!(f, "{{{}}}({}) ", text, print_uuid(uuid)),
+                NodeContent::Reference(uuid) => write!(f, "#({}) ", print_uuid(uuid)),
             }?
         }
 

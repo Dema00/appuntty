@@ -212,34 +212,39 @@ fn get_uuid(
     tree: HRef<Node>,
     wanted_uuids: &mut HashMap<VecID, RefCell<Vec<RefSetterClosure>>>,
 ) -> WSRef<UUID> {
-    //let uuid = UUID::new(None, addr_vec[0]);
-    //Rc::downgrade(&uuid)
     match tree.borrow().search_by_vec_id(&addr_vec) {
         Some(node) => Rc::downgrade(&node.borrow().uuid),
         None => {
             let ref_ref = RefOfReference::new(&tree);
-            //wanted_uuids.insert(addr_vec, Box::new(move |uuid| {
-            //    ref_ref.node.borrow().replace_content(ref_ref.id, NodeContent::Reference(Rc::downgrade(&uuid)));
-            //    todo!()
-            //}));
+
+            let lazy_closure = move |uuid| {
+
+                        let cont = ref_ref.node.borrow().cont.borrow()[ref_ref.id].clone();
+
+                        match cont {
+                            NodeContent::Reference(_) => ref_ref.node.borrow().replace_content(
+                                ref_ref.id,
+                                NodeContent::Reference(Rc::downgrade(&uuid)),
+                            ),
+
+                            NodeContent::Blob((word, _)) => ref_ref.node.borrow().replace_content(
+                                ref_ref.id,
+                                NodeContent::Blob((word.clone(),Rc::downgrade(&uuid))),
+                            ),
+
+                            _ => panic!("Error while lazily linking UUID: wrong content id")
+                        }
+
+                    };
+            
             match wanted_uuids.get(&addr_vec) {
                 Some(vec) => {
-                    vec.borrow_mut().push(Box::new(move |uuid| {
-                        ref_ref.node.borrow().replace_content(
-                            ref_ref.id,
-                            NodeContent::Reference(Rc::downgrade(&uuid)),
-                        );
-                    }));
+                    vec.borrow_mut().push(Box::new(lazy_closure));
                 }
                 None => {
                     wanted_uuids.insert(
                         addr_vec,
-                        RefCell::new(vec![Box::new(move |uuid| {
-                            ref_ref.node.borrow().replace_content(
-                                ref_ref.id,
-                                NodeContent::Reference(Rc::downgrade(&uuid)),
-                            );
-                        })]),
+                        RefCell::new(vec![Box::new(lazy_closure)]),
                     );
                 }
             };
@@ -331,7 +336,7 @@ mod tests {
     fn node_test() {
         let mut wanted_uuids = HashMap::<VecID, RefCell<Vec<Box<dyn Fn(SRef<UUID>) -> ()>>>>::new();
         let res = node(
-            "- A \n - A.A #(0.1.0) \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
+            "- A \n - A.A #(0.1.0) {test}(0.0.1) \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
             None,
             &mut wanted_uuids,
         );
@@ -344,7 +349,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", res.borrow()),
-            "- (0) A \n - (0.0) A.A blob(a.a) \n  - (0.0.0) A.A.A \n  - (0.0.1) A.A.B \n - (0.1) A.B \n  - (0.1.0) A.B.A \n"
+            "- (0) A \n - (0.0) A.A #(0.1.0) {test}(0.0.1) \n  - (0.0.0) A.A.A \n  - (0.0.1) A.A.B \n - (0.1) A.B \n  - (0.1.0) A.B.A \n"
         );
     }
 }
