@@ -97,10 +97,9 @@ pub struct Node {
 
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-
         fn print_uuid(uuid: &WSRef<UUID>) -> String {
             match uuid.upgrade() {
-                Some(uuid) => format!("{}",uuid.borrow()),
+                Some(uuid) => format!("{}", uuid.borrow()),
                 None => format!("No Reference)"),
             }
         }
@@ -163,10 +162,14 @@ impl Node {
 
     pub fn check_and_rectify_wanted_status(
         &self,
-        wanted_uuids: &mut HashMap<(VecID), RefCell<Vec<RefSetterClosure>>>,
+        wanted_uuids: &mut HashMap<VecID, RefCell<Vec<RefSetterClosure>>>,
     ) {
         match wanted_uuids.get(&self.uuid.borrow().to_vec_id()) {
-            Some(vec) => {vec.borrow().iter().for_each(|closure| closure(Rc::clone(&self.uuid)));},
+            Some(vec) => {
+                vec.borrow()
+                    .iter()
+                    .for_each(|closure| closure(Rc::clone(&self.uuid)));
+            }
             None => (),
         }
     }

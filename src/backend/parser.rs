@@ -2,29 +2,27 @@ extern crate nom;
 
 use crate::backend::node::NodeContent;
 
-use super::node::{HRef, Node, NodeElement, NodeProperty, SRef, WHRef, WSRef, UUID};
+use super::node::{HRef, Node, NodeElement, NodeProperty, SRef, WSRef, UUID};
 
 use core::panic;
 use std::{
     cell::RefCell,
     collections::HashMap,
-    pin::Pin,
     rc::{Rc, Weak},
     str::FromStr,
 };
 
 use nom::{
     branch::alt,
-    bytes::complete::{is_a, tag, take, take_till, take_until, take_while, take_while_m_n},
+    bytes::complete::{tag, take_until},
     character::{
         complete::char,
-        complete::{digit1, multispace0, multispace1, newline, one_of},
-        is_alphabetic, is_alphanumeric, is_digit, is_space,
+        complete::{digit1, multispace0, multispace1, newline}
     },
-    combinator::{map, map_res, peek, value},
-    error::{Error, ParseError},
-    multi::{count, fold_many0, many0, many0_count, many_till, separated_list0, separated_list1},
-    sequence::{delimited, pair, preceded, terminated, tuple, Tuple},
+    combinator::{map, map_res, peek},
+    error::{ParseError},
+    multi::{many0, many0_count, separated_list1},
+    sequence::{delimited, pair, preceded, terminated},
     IResult, Parser,
 };
 
@@ -143,7 +141,9 @@ fn node<'i>(
 
     let new_node = Node::new(parent.map_or(None, |parent_inner| Some(Rc::clone(&parent_inner))));
     populate_node(Rc::clone(&new_node), contents, &mut wanted_uuids);
-    new_node.borrow().check_and_rectify_wanted_status(wanted_uuids);
+    new_node
+        .borrow()
+        .check_and_rectify_wanted_status(wanted_uuids);
 
     if !input.is_empty() {
         let (_, mut next_depth) = get_depth.parse(input)?;
@@ -181,26 +181,20 @@ fn populate_node(
     contents: Vec<NodeElement>,
     wanted_uuids: &mut HashMap<VecID, RefCell<Vec<RefSetterClosure>>>,
 ) {
-    
     for element in contents {
         match element {
-            NodeElement::Word(word) => {
-                node.borrow_mut().push_content(NodeContent::Text(String::from(word)))
-            }
+            NodeElement::Word(word) => node
+                .borrow_mut()
+                .push_content(NodeContent::Text(String::from(word))),
             NodeElement::Property(property) => node.borrow_mut().push_property(property),
             NodeElement::TempBlob((word, addr)) => {
-                let new_content = NodeContent::Blob((
-                    word,
-                    get_uuid(addr, Rc::clone(&node), wanted_uuids),
-                ));
+                let new_content =
+                    NodeContent::Blob((word, get_uuid(addr, Rc::clone(&node), wanted_uuids)));
                 node.borrow_mut().push_content(new_content);
             }
             NodeElement::TempRef(addr) => {
-                let new_contet = NodeContent::Reference(get_uuid(
-                    addr,
-                    Rc::clone(&node),
-                    wanted_uuids,
-                ));
+                let new_contet =
+                    NodeContent::Reference(get_uuid(addr, Rc::clone(&node), wanted_uuids));
                 node.borrow().push_content(new_contet)
             }
         }
@@ -218,34 +212,29 @@ fn get_uuid(
             let ref_ref = RefOfReference::new(&tree);
 
             let lazy_closure = move |uuid| {
+                let cont = ref_ref.node.borrow().cont.borrow()[ref_ref.id].clone();
 
-                        let cont = ref_ref.node.borrow().cont.borrow()[ref_ref.id].clone();
+                match cont {
+                    NodeContent::Reference(_) => ref_ref
+                        .node
+                        .borrow()
+                        .replace_content(ref_ref.id, NodeContent::Reference(Rc::downgrade(&uuid))),
 
-                        match cont {
-                            NodeContent::Reference(_) => ref_ref.node.borrow().replace_content(
-                                ref_ref.id,
-                                NodeContent::Reference(Rc::downgrade(&uuid)),
-                            ),
+                    NodeContent::Blob((word, _)) => ref_ref.node.borrow().replace_content(
+                        ref_ref.id,
+                        NodeContent::Blob((word.clone(), Rc::downgrade(&uuid))),
+                    ),
 
-                            NodeContent::Blob((word, _)) => ref_ref.node.borrow().replace_content(
-                                ref_ref.id,
-                                NodeContent::Blob((word.clone(),Rc::downgrade(&uuid))),
-                            ),
+                    _ => panic!("Error while lazily linking UUID: wrong content id"),
+                }
+            };
 
-                            _ => panic!("Error while lazily linking UUID: wrong content id")
-                        }
-
-                    };
-            
             match wanted_uuids.get(&addr_vec) {
                 Some(vec) => {
                     vec.borrow_mut().push(Box::new(lazy_closure));
                 }
                 None => {
-                    wanted_uuids.insert(
-                        addr_vec,
-                        RefCell::new(vec![Box::new(lazy_closure)]),
-                    );
+                    wanted_uuids.insert(addr_vec, RefCell::new(vec![Box::new(lazy_closure)]));
                 }
             };
             Weak::new()
@@ -259,7 +248,7 @@ fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Par
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, cell::RefCell};
+    use std::{cell::RefCell, collections::HashMap};
 
     use crate::backend::{
         node::{HRef, Node, NodeContent, NodeElement, NodeProperty, SRef, UUID},
