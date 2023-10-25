@@ -1,10 +1,11 @@
 use core::fmt;
 use std::{
-    borrow::BorrowMut,
     cell::RefCell,
-    fmt::write,
+    collections::HashMap,
     rc::{Rc, Weak},
 };
+
+use crate::backend::parser::{RefSetterClosure, VecID};
 
 #[derive(Debug, Clone)]
 pub struct UUID {
@@ -104,9 +105,10 @@ impl fmt::Display for Node {
             match content {
                 NodeContent::Text(text) => write!(f, "{} ", text),
                 NodeContent::Blob((text, _)) => write!(f, "blob({}) ", text),
-                NodeContent::Reference(uuid) => uuid
-                    .upgrade()
-                    .map_or(write!(f, "None"), |uuid| write!(f, "{}", uuid.borrow())),
+                NodeContent::Reference(uuid) => match uuid.upgrade() {
+                    Some(uuid) => write!(f, "#({})", uuid.borrow()),
+                    None => write!(f, "#(No Reference)"),
+                },
             }?
         }
 
@@ -148,6 +150,24 @@ impl Node {
             sons: RefCell::new(Vec::new()),
             prop: RefCell::new(Vec::new()),
         })))
+    }
+
+    pub fn replace_content(&self, id: usize, new_content: NodeContent) {
+        self.cont.borrow_mut()[id] = new_content;
+    }
+
+    pub fn check_and_rectify_wanted_status(
+        &self,
+        wanted_uuids: &mut HashMap<(VecID), RefCell<Vec<RefSetterClosure>>>,
+    ) {
+        match wanted_uuids.get(&self.uuid.borrow().to_vec_id()) {
+            Some(vec) => {vec.borrow().iter().for_each(|closure| closure(Rc::clone(&self.uuid)));},
+            None => (),
+        }
+    }
+
+    pub fn get_cont_len(&self) -> usize {
+        self.cont.borrow().len()
     }
 
     pub fn append_contents(&self, mut contents: Vec<NodeContent>) {
@@ -207,34 +227,43 @@ impl Node {
     }
 
     pub fn go_down(&self, addr: Vec<usize>) -> Option<HRef<Node>> {
-
         if addr.is_empty() {
             return None;
         }
         if addr.len() == 1 {
-            self.sons.borrow().get(addr[0]).map_or(None, |node| Some(Rc::clone(node)))
+            self.sons
+                .borrow()
+                .get(addr[0])
+                .map_or(None, |node| Some(Rc::clone(node)))
         } else {
-            self.sons.borrow().get(addr[0]).map_or(None, |node| node.borrow().go_down(addr[1..].to_vec()))
+            self.sons
+                .borrow()
+                .get(addr[0])
+                .map_or(None, |node| node.borrow().go_down(addr[1..].to_vec()))
         }
     }
 
-    pub fn node_from_UUID(&self, uuid: SRef<UUID>) -> Option<HRef<Node>> {
+    pub fn search_by_uuid(&self, uuid: SRef<UUID>) -> Option<HRef<Node>> {
         let v_id_other = uuid.borrow().to_vec_id();
-        
-        self.node_from_vec_id(v_id_other)
+        self.search_by_vec_id(&v_id_other)
     }
 
-    pub fn node_from_vec_id(&self, addr: Vec<usize>) -> Option<HRef<Node>> {
-
+    pub fn search_by_vec_id(&self, addr: &Vec<usize>) -> Option<HRef<Node>> {
         let v_id_self = self.uuid.borrow().to_vec_id();
 
-        let shared_addr_len: usize = v_id_self.iter().zip(addr.clone()).fold(0,|c,(&s, o)| if s == o {c + 1} else {c});
+        let shared_addr_len: usize =
+            v_id_self
+                .iter()
+                .zip(addr.clone())
+                .fold(0, |c, (&s, o)| if s == o { c + 1 } else { c });
 
         let distance_from_shared_addr = (shared_addr_len).abs_diff(v_id_self.len());
 
         let starting_node = self.go_up(distance_from_shared_addr)?;
 
-        let return_node = starting_node.borrow().go_down(addr[shared_addr_len..].to_vec());
+        let return_node = starting_node
+            .borrow()
+            .go_down(addr[shared_addr_len..].to_vec());
 
         return_node
     }

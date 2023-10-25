@@ -6,6 +6,8 @@ use super::node::{HRef, Node, NodeElement, NodeProperty, SRef, WHRef, WSRef, UUI
 
 use core::panic;
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     pin::Pin,
     rc::{Rc, Weak},
     str::FromStr,
@@ -28,7 +30,7 @@ use nom::{
 
 //Data Structures
 
-type TempRefID = Vec<usize>;
+pub type VecID = Vec<usize>;
 
 //Text Parser Elements
 
@@ -36,11 +38,11 @@ fn parse_numbers(input: &str) -> IResult<&str, usize> {
     map_res(digit1, usize::from_str).parse(input)
 }
 
-fn parse_id(input: &str) -> IResult<&str, TempRefID> {
+fn parse_id(input: &str) -> IResult<&str, VecID> {
     delimited(tag("("), separated_list1(tag("."), parse_numbers), tag(")")).parse(input)
 }
 
-fn uuid(input: &str) -> IResult<&str, TempRefID> {
+fn uuid(input: &str) -> IResult<&str, VecID> {
     preceded(tag("#"), parse_id).parse(input)
 }
 
@@ -128,20 +130,27 @@ fn get_depth<'i>(input: &'i str) -> IResult<&'i str, usize> {
     peek(delimited(many0(newline), many0_count(tag(" ")), tag("-"))).parse(input)
 }
 
-fn node(input: &str, parent: Option<HRef<Node>>) -> IResult<&str, HRef<Node>> {
+pub type RefSetterClosure = Box<dyn Fn(SRef<UUID>) -> ()>;
+
+fn node<'i>(
+    input: &'i str,
+    parent: Option<HRef<Node>>,
+    mut wanted_uuids: &mut HashMap<VecID, RefCell<Vec<RefSetterClosure>>>,
+) -> IResult<&'i str, HRef<Node>> {
     let (_, depth) = get_depth.parse(input)?;
 
     let (mut input, contents) = preceded(multispace0, node_content).parse(input)?;
 
     let new_node = Node::new(parent.map_or(None, |parent_inner| Some(Rc::clone(&parent_inner))));
-    populate_node(Rc::clone(&new_node), contents);
+    populate_node(Rc::clone(&new_node), contents, &mut wanted_uuids);
+    new_node.borrow().check_and_rectify_wanted_status(wanted_uuids);
 
     if !input.is_empty() {
         let (_, mut next_depth) = get_depth.parse(input)?;
 
         while depth < next_depth && !input.is_empty() {
             let child_node;
-            (input, child_node) = node(input, Some(Rc::clone(&new_node)))?;
+            (input, child_node) = node(input, Some(Rc::clone(&new_node)), &mut wanted_uuids)?;
             new_node.borrow_mut().push_child(child_node);
 
             if !input.is_empty() {
@@ -153,23 +162,90 @@ fn node(input: &str, parent: Option<HRef<Node>>) -> IResult<&str, HRef<Node>> {
     IResult::Ok((input, new_node))
 }
 
-fn populate_node(node: HRef<Node>, contents: Vec<NodeElement>) {
-    let node = node.borrow_mut();
-    for element in contents {
-        match element {
-            NodeElement::Word(word) => node.push_content(NodeContent::Text(String::from(word))),
-            NodeElement::Property(property) => node.push_property(property),
-            NodeElement::TempBlob((word, addr)) => {
-                node.push_content(NodeContent::Blob((word, get_uuid(addr))))
-            }
-            NodeElement::TempRef(addr) => node.push_content(NodeContent::Reference(get_uuid(addr))),
+struct RefOfReference {
+    node: HRef<Node>,
+    id: usize,
+}
+
+impl RefOfReference {
+    pub fn new(node: &HRef<Node>) -> Self {
+        RefOfReference {
+            node: Rc::clone(node),
+            id: Rc::clone(node).borrow().get_cont_len(),
         }
     }
 }
 
-fn get_uuid(addr_vec: TempRefID) -> WSRef<UUID> {
-    let uuid = UUID::new(None, addr_vec[0]);
-    Rc::downgrade(&uuid)
+fn populate_node(
+    node: HRef<Node>,
+    contents: Vec<NodeElement>,
+    wanted_uuids: &mut HashMap<VecID, RefCell<Vec<RefSetterClosure>>>,
+) {
+    
+    for element in contents {
+        match element {
+            NodeElement::Word(word) => {
+                node.borrow_mut().push_content(NodeContent::Text(String::from(word)))
+            }
+            NodeElement::Property(property) => node.borrow_mut().push_property(property),
+            NodeElement::TempBlob((word, addr)) => {
+                let new_content = NodeContent::Blob((
+                    word,
+                    get_uuid(addr, Rc::clone(&node), wanted_uuids),
+                ));
+                node.borrow_mut().push_content(new_content);
+            }
+            NodeElement::TempRef(addr) => {
+                let new_contet = NodeContent::Reference(get_uuid(
+                    addr,
+                    Rc::clone(&node),
+                    wanted_uuids,
+                ));
+                node.borrow().push_content(new_contet)
+            }
+        }
+    }
+}
+
+fn get_uuid(
+    addr_vec: VecID,
+    tree: HRef<Node>,
+    wanted_uuids: &mut HashMap<VecID, RefCell<Vec<RefSetterClosure>>>,
+) -> WSRef<UUID> {
+    //let uuid = UUID::new(None, addr_vec[0]);
+    //Rc::downgrade(&uuid)
+    match tree.borrow().search_by_vec_id(&addr_vec) {
+        Some(node) => Rc::downgrade(&node.borrow().uuid),
+        None => {
+            let ref_ref = RefOfReference::new(&tree);
+            //wanted_uuids.insert(addr_vec, Box::new(move |uuid| {
+            //    ref_ref.node.borrow().replace_content(ref_ref.id, NodeContent::Reference(Rc::downgrade(&uuid)));
+            //    todo!()
+            //}));
+            match wanted_uuids.get(&addr_vec) {
+                Some(vec) => {
+                    vec.borrow_mut().push(Box::new(move |uuid| {
+                        ref_ref.node.borrow().replace_content(
+                            ref_ref.id,
+                            NodeContent::Reference(Rc::downgrade(&uuid)),
+                        );
+                    }));
+                }
+                None => {
+                    wanted_uuids.insert(
+                        addr_vec,
+                        RefCell::new(vec![Box::new(move |uuid| {
+                            ref_ref.node.borrow().replace_content(
+                                ref_ref.id,
+                                NodeContent::Reference(Rc::downgrade(&uuid)),
+                            );
+                        })]),
+                    );
+                }
+            };
+            Weak::new()
+        }
+    }
 }
 
 fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Parser<&'a str, O, E> {
@@ -178,9 +254,13 @@ fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Par
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, cell::RefCell};
+
     use crate::backend::{
-        node::{HRef, Node, NodeContent, NodeElement, NodeProperty, UUID},
-        parser::{blob, get_depth, node_content, prop_blob, prop_rbind, property, uuid, word},
+        node::{HRef, Node, NodeContent, NodeElement, NodeProperty, SRef, UUID},
+        parser::{
+            blob, get_depth, node_content, prop_blob, prop_rbind, property, uuid, word, VecID,
+        },
     };
 
     use super::node;
@@ -249,9 +329,11 @@ mod tests {
 
     #[test]
     fn node_test() {
+        let mut wanted_uuids = HashMap::<VecID, RefCell<Vec<Box<dyn Fn(SRef<UUID>) -> ()>>>>::new();
         let res = node(
-            "- A \n - A.A {a.a}(0.0) \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
+            "- A \n - A.A #(0.1.0) \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
             None,
+            &mut wanted_uuids,
         );
 
         let (out, res) = res.unwrap();
