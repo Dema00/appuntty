@@ -325,7 +325,7 @@ mod tests {
     fn node_test() {
         let mut wanted_uuids = HashMap::<VecID, RefCell<Vec<Box<dyn Fn(SRef<UUID>) -> ()>>>>::new();
         let res = node(
-            "- A \n - A.A #(0.1.0) {test}(0.0.1) \n  - A.A.A \n  - A.A.B \n - A.B \n  - A.B.A \n",
+            "- A \n - A.A #(0.1.0) {test}(0.0.1) \n  - A.A.A <rbind[0,1]> \n  - A.A.B \n - A.B \n  - A.B.A \n",
             None,
             &mut wanted_uuids,
         );
@@ -338,7 +338,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", res.borrow()),
-            "- (0) A \n - (0.0) A.A #(0.1.0) {test}(0.0.1) \n  - (0.0.0) A.A.A \n  - (0.0.1) A.A.B \n - (0.1) A.B \n  - (0.1.0) A.B.A \n"
+            "- (0) A \n - (0.0) A.A #(0.1.0) {test}(0.0.1) \n  - (0.0.0) A.A.A <rbind[0,1]> \n  - (0.0.1) A.A.B \n - (0.1) A.B \n  - (0.1.0) A.B.A \n"
         );
     }
 }

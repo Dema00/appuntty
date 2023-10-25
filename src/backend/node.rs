@@ -21,18 +21,22 @@ impl PartialEq for UUID {
 
 impl Eq for UUID {}
 
+fn vec_to_string(vector: &Vec<usize>, separator: &str) -> String {
+    vector.iter().fold(String::new(), |string, id| {
+        if string.is_empty() {
+            format!("{}", id)
+        } else {
+            format!("{}{}{}", string,separator, id)
+        }
+    })
+}
+
 impl fmt::Display for UUID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}",
-            self.to_vec_id().iter().fold(String::new(), |string, id| {
-                if string.is_empty() {
-                    format!("{}", id)
-                } else {
-                    format!("{}.{}", string, id)
-                }
-            })
+            vec_to_string(&self.to_vec_id(),".")
         )
     }
 }
@@ -118,9 +122,9 @@ impl fmt::Display for Node {
 
         for property in self.prop.borrow().iter() {
             match property {
-                NodeProperty::Blob => write!(f, "<blob>"),
-                NodeProperty::Color => write!(f, "<colored>"),
-                NodeProperty::Rbind(_) => write!(f, "<rbind>"),
+                NodeProperty::Blob => write!(f, "<blob> "),
+                NodeProperty::Color => write!(f, "<colored> "),
+                NodeProperty::Rbind(vector) => write!(f, "{}", format!("<rbind[{}]> ",vec_to_string(vector,","))),
             }?
         }
 
