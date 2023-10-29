@@ -1,3 +1,5 @@
+use crate::backend::node::node_content::NodeContent;
+use crate::backend::parser::{RefSetterClosure, VecID};
 use core::fmt;
 use std::{
     cell::RefCell,
@@ -5,7 +7,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::backend::parser::{RefSetterClosure, VecID};
+pub mod node_content;
 
 #[derive(Debug, Clone)]
 pub struct UUID {
@@ -26,18 +28,14 @@ fn vec_to_string(vector: &Vec<usize>, separator: &str) -> String {
         if string.is_empty() {
             format!("{}", id)
         } else {
-            format!("{}{}{}", string,separator, id)
+            format!("{}{}{}", string, separator, id)
         }
     })
 }
 
 impl fmt::Display for UUID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            vec_to_string(&self.to_vec_id(),".")
-        )
+        write!(f, "{}", vec_to_string(&self.to_vec_id(), "."))
     }
 }
 
@@ -83,13 +81,6 @@ pub enum NodeElement<'s> {
     Property(NodeProperty),
 }
 
-#[derive(Debug, Clone)]
-pub enum NodeContent {
-    Text(String),
-    Reference(WSRef<UUID>),
-    Blob((String, WSRef<UUID>)),
-}
-
 #[derive(Debug)]
 pub struct Node {
     pub parent: WHRef<Node>,
@@ -115,8 +106,8 @@ impl fmt::Display for Node {
         for content in self.cont.borrow().iter() {
             match content {
                 NodeContent::Text(text) => write!(f, "{} ", text),
-                NodeContent::Blob((text, uuid)) => write!(f, "{{{}}}({}) ", text, print_uuid(uuid)),
-                NodeContent::Reference(uuid) => write!(f, "#({}) ", print_uuid(uuid)),
+                NodeContent::Blob(blob) => write!(f, "{{{}}}({}) ", blob.text, print_uuid(&blob.link)),
+                NodeContent::Reference(reference) => write!(f, "#({}) ", print_uuid(&reference.link)),
             }?
         }
 
@@ -124,7 +115,9 @@ impl fmt::Display for Node {
             match property {
                 NodeProperty::Blob => write!(f, "<blob> "),
                 NodeProperty::Color => write!(f, "<colored> "),
-                NodeProperty::Rbind(vector) => write!(f, "{}", format!("<rbind[{}]> ",vec_to_string(vector,","))),
+                NodeProperty::Rbind(vector) => {
+                    write!(f, "{}", format!("<rbind[{}]> ", vec_to_string(vector, ",")))
+                }
             }?
         }
 

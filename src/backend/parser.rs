@@ -1,8 +1,8 @@
 extern crate nom;
 
-use crate::backend::node::NodeContent;
+use crate::backend::node::node_content::NodeContent;
 
-use super::node::{HRef, Node, NodeElement, NodeProperty, SRef, WSRef, UUID};
+use super::node::{HRef, Node, NodeElement, NodeProperty, SRef, WSRef, UUID, node_content::{Blob, Reference}};
 
 use core::panic;
 use std::{
@@ -17,13 +17,14 @@ use nom::{
     bytes::complete::{tag, take_until},
     character::{
         complete::char,
-        complete::{digit1, multispace0, multispace1, newline}
+        complete::{digit1, multispace0, multispace1, newline},
     },
     combinator::{map, map_res, peek},
-    error::{ParseError},
+    //error::{ParseError},
     multi::{many0, many0_count, separated_list1},
     sequence::{delimited, pair, preceded, terminated},
-    IResult, Parser,
+    IResult,
+    Parser,
 };
 
 //Data Structures
@@ -57,7 +58,7 @@ fn blob(input: &str) -> IResult<&str, (String, Vec<usize>)> {
 }
 
 fn prop_blob(input: &str) -> IResult<&str, NodeProperty> {
-    map(tag("blob"), |blob| NodeProperty::Blob).parse(input)
+    map(tag("blob"), |_| NodeProperty::Blob).parse(input)
 }
 
 fn prop_rbind(input: &str) -> IResult<&str, NodeProperty> {
@@ -130,7 +131,7 @@ fn get_depth<'i>(input: &'i str) -> IResult<&'i str, usize> {
 
 pub type RefSetterClosure = Box<dyn Fn(SRef<UUID>) -> ()>;
 
-fn node<'i>(
+pub fn node<'i>(
     input: &'i str,
     parent: Option<HRef<Node>>,
     mut wanted_uuids: &mut HashMap<VecID, RefCell<Vec<RefSetterClosure>>>,
@@ -189,12 +190,20 @@ fn populate_node(
             NodeElement::Property(property) => node.borrow_mut().push_property(property),
             NodeElement::TempBlob((word, addr)) => {
                 let new_content =
-                    NodeContent::Blob((word, get_uuid(addr, Rc::clone(&node), wanted_uuids)));
+                    //NodeContent::Blob((word, get_uuid(addr, Rc::clone(&node), wanted_uuids)));
+                    NodeContent::Blob(
+                        Blob::new(
+                            word,
+                            get_uuid(addr, Rc::clone(&node), wanted_uuids)
+                        )
+                    );
                 node.borrow_mut().push_content(new_content);
             }
             NodeElement::TempRef(addr) => {
                 let new_contet =
-                    NodeContent::Reference(get_uuid(addr, Rc::clone(&node), wanted_uuids));
+                    NodeContent::Reference(
+                        Reference::new(get_uuid(addr, Rc::clone(&node), wanted_uuids))
+                    );
                 node.borrow().push_content(new_contet)
             }
         }
@@ -218,11 +227,11 @@ fn get_uuid(
                     NodeContent::Reference(_) => ref_ref
                         .node
                         .borrow()
-                        .replace_content(ref_ref.id, NodeContent::Reference(Rc::downgrade(&uuid))),
+                        .replace_content(ref_ref.id, NodeContent::Reference(Reference::new(Rc::downgrade(&uuid)))),
 
-                    NodeContent::Blob((word, _)) => ref_ref.node.borrow().replace_content(
+                    NodeContent::Blob(blob) => ref_ref.node.borrow().replace_content(
                         ref_ref.id,
-                        NodeContent::Blob((word.clone(), Rc::downgrade(&uuid))),
+                        NodeContent::Blob(Blob::new(blob.text.clone(), Rc::downgrade(&uuid)))
                     ),
 
                     _ => panic!("Error while lazily linking UUID: wrong content id"),
@@ -242,16 +251,16 @@ fn get_uuid(
     }
 }
 
-fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Parser<&'a str, O, E> {
+/*fn ws<'a, O, E: ParseError<&'a str>, F: Parser<&'a str, O, E>>(f: F) -> impl Parser<&'a str, O, E> {
     delimited(multispace0, f, multispace0)
-}
+}*/
 
 #[cfg(test)]
 mod tests {
     use std::{cell::RefCell, collections::HashMap};
 
     use crate::backend::{
-        node::{HRef, Node, NodeContent, NodeElement, NodeProperty, SRef, UUID},
+        node::{NodeElement, NodeProperty, SRef, UUID},
         parser::{
             blob, get_depth, node_content, prop_blob, prop_rbind, property, uuid, word, VecID,
         },
